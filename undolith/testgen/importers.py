@@ -237,6 +237,60 @@ def from_sharegpt(record: Dict[str, Any], *, source: str = "sharegpt") -> Trace:
                  meta={k: v for k, v in record.items() if k not in ("conversations", "messages")})
 
 
+# ----------------------------------------------------------------------------- OSWorld
+OSWORLD_SPECIAL = {"DONE", "FAIL", "WAIT"}
+
+
+def from_osworld(example_dir: Union[str, Path], *, examples_root: Union[str, Path, None] = None) -> Trace:
+    """One OSWorld result directory (``traj.jsonl`` + ``result.txt``) → trace.
+
+    Layout written by OSWorld's runner: ``results/<action_space>/<obs>/<model>/<domain>/<example_id>/``.
+    The task text lives in ``evaluation_examples/examples/<domain>/<example_id>.json``; pass
+    ``examples_root`` (that ``examples`` folder) to fill it in. Screenshots are not imported.
+    """
+    d = Path(example_dir)
+    task, steps, final = "", [], None
+    for line in (d / "traj.jsonl").read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        if "instruction" in rec and "step_num" not in rec:
+            task = task or rec["instruction"]
+            continue
+        action = rec.get("action")
+        text = action if isinstance(action, str) else json.dumps(action, sort_keys=True)
+        if isinstance(action, str) and action.strip().upper() in OSWORLD_SPECIAL:
+            word = action.strip().upper()
+            if word in ("DONE", "FAIL"):
+                final = word
+            continue
+        info = rec.get("info") or {}
+        error = info.get("error") if isinstance(info, dict) else None
+        steps.append(Step(name="pyautogui" if isinstance(action, str) else str(action.get("action_type", "action")),
+                          args={"input": text}, result={"reward": rec.get("reward"), "done": rec.get("done")},
+                          error=error, status=ERROR if error else OK,
+                          thought=str(rec.get("response") or "")[:2000], ref=f"step {rec.get('step_num')}"))
+    if not task and examples_root is not None:
+        spec = Path(examples_root) / d.parent.name / f"{d.name}.json"
+        if spec.exists():
+            task = json.loads(spec.read_text(encoding="utf-8")).get("instruction", "")
+    score = None
+    if (d / "result.txt").exists():
+        try:
+            score = float((d / "result.txt").read_text().strip())
+        except ValueError:
+            pass
+    outcome = None if score is None else ("success" if score >= 1.0 else "failure")
+    return Trace(id=f"{d.parent.name}/{d.name}", task=task, steps=steps, final=final, source="osworld",
+                 outcome=outcome, meta={"score": score, "domain": d.parent.name})
+
+
+def load_osworld(results_root: Union[str, Path], *, examples_root: Union[str, Path, None] = None,
+                 limit: Optional[int] = None) -> List[Trace]:
+    dirs = sorted(p.parent for p in Path(results_root).rglob("traj.jsonl"))
+    return [from_osworld(p, examples_root=examples_root) for p in dirs[:limit]]
+
+
 # ----------------------------------------------------------------------------- files & datasets
 def detect_format(record: Dict[str, Any]) -> str:
     if "steps" in record and "task" in record:
@@ -290,6 +344,12 @@ def _records(path: Path) -> Iterable[Dict[str, Any]]:
 
 
 def load_traces(path: Union[str, Path], fmt: str = "auto", *, limit: Optional[int] = None) -> List[Trace]:
+    """A json/jsonl file of traces, an OSWorld ``traj.jsonl``, or a directory of OSWorld results."""
+    p = Path(path)
+    if fmt == "osworld" or p.is_dir() or p.name == "traj.jsonl":
+        if p.is_dir():
+            return load_osworld(p, limit=limit)
+        return [from_osworld(p.parent)]
     out = []
     for n, rec in enumerate(_records(Path(path))):
         if limit is not None and n >= limit:

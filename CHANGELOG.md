@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 (2026-09-23)
+
+* `undolith ui`: a local web console for sessions, actions (arguments, simulated diff, signed timeline), the outbox, undo, rollback, kill switch, chain verification and proof download. It binds to localhost only, requires a per-launch token for actions, checks `Host` and `Origin`, and renders all ledger content as text.
+* `testgen minimize`: ddmin shrinks each test's cassette to the entries that still reproduce the same failure, and reports tests that would not catch a given agent. `minimize_trace` finds the shortest failing prefix.
+* OSWorld importer (`traj.jsonl` + `result.txt`, task text from `evaluation_examples`).
+* Release workflow: tag `v*` to test, build, `twine check` and publish to PyPI through trusted publishing (no stored token), then create a GitHub release.
+* Packaging: SPDX license expression (`license = "MIT"`).
+
 ## 0.2.0 (2026-09-23)
 
 Agent traces → regression tests (`undolith.testgen`, [SPEC.md §12](SPEC.md#12-traces--regression-tests)).

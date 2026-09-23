@@ -30,7 +30,7 @@ def add_parser(sub: Any) -> None:
 
     p = ts.add_parser("import", help="generate tests from trace files (json/jsonl)")
     p.add_argument("files", nargs="+")
-    p.add_argument("--format", default="auto", choices=["auto", "sharegpt", "openai", "anthropic", "trace"])
+    p.add_argument("--format", default="auto", choices=["auto", "sharegpt", "openai", "anthropic", "trace", "osworld"])
     p.add_argument("--limit", type=int, help="max traces per file")
     p.add_argument("--judge", default="heuristic", help=JUDGE_HELP)
     p.add_argument("--no-golden", action="store_true")
@@ -64,6 +64,13 @@ def add_parser(sub: Any) -> None:
     p.add_argument("--agent", required=True, help="module:function taking (task, tools)")
     p.add_argument("--judge", default="heuristic", help=JUDGE_HELP)
     p.add_argument("-o", "--out", default="tests/test_agent_regressions.py")
+
+    p = ts.add_parser("minimize", help="shrink each test to the smallest cassette that still makes AGENT fail")
+    p.add_argument("suite")
+    p.add_argument("--agent", required=True, help="the buggy agent the tests should catch (module:function)")
+    p.add_argument("--test", action="append", help="only these test ids (repeatable)")
+    p.add_argument("--judge", default="heuristic", help=JUDGE_HELP)
+    p.add_argument("-o", "--out", help="write the minimised suite here (default: overwrite SUITE)")
 
     p = ts.add_parser("show", help="list the tests in a suite")
     p.add_argument("suite")
@@ -105,6 +112,21 @@ def run(a: Any) -> int:
         report = run_suite(a.suite, load_agent(a.agent), judge=make_judge(a.judge))
         print(report.explain(only_failures=not a.verbose))
         return 0 if report.ok else 1
+    if cmd == "minimize":
+        from .minimize import minimize_test
+
+        suite, agent, judge = Suite.load(a.suite), load_agent(a.agent), make_judge(a.judge)
+        missed = 0
+        for i, t in enumerate(suite.tests):
+            if a.test and t.id not in a.test:
+                continue
+            m = minimize_test(t, agent, judge=judge)
+            print(m.describe())
+            missed += not m.reproduces
+            suite.tests[i] = m.test
+        suite.save(a.out or a.suite)
+        print(f"wrote {a.out or a.suite}" + (f"; {missed} test(s) do not catch this agent" if missed else ""))
+        return 0
     if cmd == "export-pytest":
         out = export_pytest(a.suite, a.agent, a.out, judge=a.judge)
         print(f"wrote {out} (+ {out.with_name(out.stem + '.suite.json').name}); run it with: pytest {out}")

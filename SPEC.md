@@ -438,3 +438,16 @@ that checks against them.
 A test fails if an expected call is missing, a forbidden call is made, a call
 limit is exceeded, the final answer does not match, the agent raises an
 exception, or (with `must_pass_judge`) the judge flags the new run.
+
+### 12.5 Minimisation
+
+`minimize_test(test, agent)` applies ddmin (Zeller & Hildebrandt) to the
+cassette. It keeps the smallest subset of recorded responses for which `agent`
+still fails the test with the **same failure signature**: the set of failure
+kinds, such as `forbidden`, `expected`, `repeats`, `final`, `judge` or `crash`.
+The result is 1-minimal, meaning that removing any one remaining entry makes
+that failure go away. If the agent passes the original test, the test does not
+reproduce anything for that agent, and it is reported as such.
+
+`minimize_trace(trace, judge)` binary-searches for the shortest prefix of a
+trace that the judge still flags: where the failure first becomes visible.

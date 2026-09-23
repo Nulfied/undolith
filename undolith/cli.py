@@ -112,6 +112,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p = sub.add_parser("policy", help="print the default policy as JSON (a starting point for your own)")
 
+    p = sub.add_parser("ui", help="local web console: ledger, outbox, undo, kill switch")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--no-browser", action="store_true")
+
     from .testgen import cli as testgen_cli
 
     testgen_cli.add_parser(sub)
@@ -125,6 +130,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return testgen_cli.run(a)
 
     guard = _load_app(a.app, a.home)
+
+    if a.cmd == "ui":
+        from .ui import serve
+
+        serve(guard, a.host, a.port, open_browser=not a.no_browser)
+        return 0
 
     if a.cmd == "log":
         if a.entries:

@@ -42,6 +42,8 @@ Irreversible actions like email, payments and `git push` cannot be undone, so Un
 pip install git+https://github.com/Nulfied/undolith
 ```
 
+(A PyPI release, `pip install undolith`, is coming.)
+
 or clone the repository and run `pip install -e .`. If the optional `cryptography` package is installed, signing gets faster. Nothing else changes.
 
 ## 60-second tour
@@ -164,14 +166,27 @@ undolith testgen run agent_tests.json --agent my_agent:run
 undolith testgen export-pytest agent_tests.json --agent my_agent:run -o tests/test_agent_regressions.py
 ```
 
-Importers cover Undolith ledgers, OpenAI `tool_calls`, Anthropic `tool_use`, and ShareGPT/ReAct datasets (AgentInstruct's OS, DB, KG, ALFWorld, WebShop and Mind2Web formats). The Ollama judge **confirms its own failures** with a second prompt and downgrades unconfirmed ones to warnings. Small models produce false positives, and this pass filters many of them out.
+Importers cover Undolith ledgers, OpenAI `tool_calls`, Anthropic `tool_use`, ShareGPT/ReAct datasets (AgentInstruct's OS, DB, KG, ALFWorld, WebShop and Mind2Web formats), and [OSWorld](https://github.com/xlang-ai/OSWorld) result folders (`traj.jsonl` + `result.txt`; point `import` at the results directory). The Ollama judge **confirms its own failures** with a second prompt and downgrades unconfirmed ones to warnings. Small models produce false positives, and this pass filters many of them out.
 
 Here is what it did on a first sample of 8 real AgentInstruct trajectories with `llama3.2` (3B) on a laptop CPU:
 
 * It confirmed a real bug in a trajectory published as a gold example. `os_2` answers `0` to "how many entries have user-read permission" because it grepped the wrong column of `ls -l` (`'^...r'`).
 * It filtered out its own 3 false positives on WebShop episodes that correctly end with `click[Buy Now]`.
 
+**Minimising tests.** `undolith testgen minimize suite.json --agent buggy:run` shrinks each test to the fewest recorded responses that still make the buggy agent fail *for the same reason*, using delta debugging. It also tells you which tests would not catch that agent at all. In the test suite, a 7-entry cassette shrinks to the single `config.yaml` read that triggers the bad delete.
+
 That is a small sample and small models are noisy, so review flagged tests before you trust them. Every test records which judge and rule produced it. The format is specified in [SPEC.md §12](SPEC.md#12-traces--regression-tests).
+
+## Web console
+
+```bash
+undolith ui                      # http://127.0.0.1:8765
+undolith --app my_agent:guard ui # with your adapters, so Undo / Release can run your inverses
+```
+
+The console shows sessions (with their task and final answer), every action with its risk, status, redacted arguments, simulated diff and signed ledger timeline, and the outbox of held actions. From it you can undo an action, roll back or kill a session, release or discard held actions, verify the chain, download a proof, and flip the global kill switch.
+
+It is local only. It binds to 127.0.0.1, refuses non-local `Host` headers (DNS rebinding), and requires a per-launch token plus a same-origin check for every action, so another website open in your browser cannot trigger one. Ledger contents are rendered as text, never HTML, so a malicious agent argument cannot inject script.
 
 ## Policy
 
@@ -198,8 +213,10 @@ undolith kill                        # global kill switch for every process usin
 undolith held                        # outbox
 undolith release ACTION_ID
 undolith replay SESSION_ID --sandbox ./replay
+undolith ui                                               # local web console
 undolith testgen from-ledger -o agent_tests.json          # ledger → regression tests
 undolith testgen run agent_tests.json --agent my_agent:run
+undolith testgen minimize agent_tests.json --agent my_agent_v1:run
 ```
 
 Commands that run inverses need your adapters. Point `--app mymodule:guard` at your `Undolith` instance.
@@ -225,10 +242,12 @@ The test suite covers the RFC 8032 test vectors, tamper detection, forged proofs
 - [ ] Chain-head anchoring (git notes / public transparency log)
 - [ ] Postgres adapter (`SAVEPOINT`-based dry-run)
 - [ ] S3 / cloud object-versioning adapter
-- [ ] Web UI for the outbox and ledger
+- [x] Web UI for the outbox and ledger (`undolith ui`)
 - [x] Regression tests generated from ledger traces (`undolith.testgen`)
-- [ ] Trace minimisation: shrink a failing trace to the smallest reproducing prefix
-- [ ] WebArena / OSWorld trajectory importers
+- [x] Trace minimisation (`testgen minimize`, delta debugging)
+- [x] OSWorld trajectory importer
+- [ ] PyPI release (workflow ready: trusted publishing, no stored tokens)
+- [ ] WebArena importer (waiting on a stable public trajectory format)
 
 ## License
 
