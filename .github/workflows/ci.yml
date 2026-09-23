@@ -21,8 +21,8 @@ jobs:
           - { os: macos-latest, crypto: fast }
           - { os: windows-latest, crypto: fast }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Install

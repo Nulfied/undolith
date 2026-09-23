@@ -27,6 +27,7 @@ from .lifecycle import first
 from .model import UndolithError
 
 ACTIONS = ("undo", "rollback", "release", "discard", "kill", "resume")
+MAX_BODY = 1 << 20
 
 
 def _sessions(guard: Undolith) -> list:
@@ -157,6 +158,16 @@ def make_handler(guard: Undolith, token: str, lock: threading.Lock):
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
+            # Always drain the request body before replying, even to refuse it: closing a socket
+            # with unread data makes Windows reset the connection instead of delivering our 403.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if not 0 <= n <= MAX_BODY:
+                self.close_connection = True
+                return self._send(413, {"error": "request body too large"})
+            raw = self.rfile.read(n) if n else b""
             if not self._host_ok():
                 return self._send(403, {"error": "bad host"})
             origin = self.headers.get("Origin")
@@ -168,8 +179,7 @@ def make_handler(guard: Undolith, token: str, lock: threading.Lock):
             if op not in ACTIONS:
                 return self._send(404, {"error": "unknown action"})
             try:
-                n = int(self.headers.get("Content-Length") or 0)
-                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+                body = json.loads(raw or b"{}")
                 with lock:
                     msg = perform(guard, op, body)
                 return self._send(200, {"ok": True, "message": msg})
