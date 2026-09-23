@@ -1,0 +1,22 @@
+{
+  "defaults": {
+    "read": "allow",
+    "write": "simulate",
+    "destructive": "simulate",
+    "irreversible": "approve"
+  },
+  "rules": [
+    { "match": "fs.*", "args": { "path": "*.env" }, "verdict": "deny", "reason": "secrets are off-limits" },
+    { "match": "fs.*", "args": { "path": ".git/*" }, "verdict": "deny", "reason": "use the git tools, not raw files" },
+    { "match": "db.execute", "min_risk": "destructive", "verdict": "approve", "reason": "destructive SQL needs a human" },
+    { "match": "email.send", "verdict": "hold", "reason": "all outbound mail is reviewed" },
+    { "match": "http.request", "args": { "url": "*/payments*" }, "verdict": "hold", "reason": "money moves only on release" }
+  ],
+  "max_destructive_per_session": 5,
+  "max_mutations_per_session": 200,
+  "approve_irreversible_destructive": true,
+  "require_simulator": false,
+  "deviation": { "threshold": 0.0, "on": "rollback" },
+  "redact": ["password", "secret", "token", "api_key", "authorization", "cookie"],
+  "log_reads": true
+}

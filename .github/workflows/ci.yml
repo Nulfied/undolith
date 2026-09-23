@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.9", "3.11", "3.13"]
+        crypto: ["pure", "fast"]
+        exclude:
+          - { os: macos-latest, crypto: fast }
+          - { os: windows-latest, crypto: fast }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Install optional cryptography
+        if: matrix.crypto == 'fast'
+        run: python -m pip install cryptography
+      - name: Test
+        run: python -m pytest -q
+      - name: Demos
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          python examples/quickstart.py
+          python examples/rogue_agent.py
+      - name: CLI smoke test
+        shell: bash
+        run: |
+          undolith --version
+          undolith policy > /dev/null
