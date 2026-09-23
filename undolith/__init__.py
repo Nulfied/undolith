@@ -5,7 +5,7 @@ simulated with a diff, snapshotted, committed, compared with its prediction,
 and written to a hash-chained, signed ledger, so it can be proven and undone.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .approvers import AutoApprove, AutoReject, ConsoleApprover
 from .classify import classify_name

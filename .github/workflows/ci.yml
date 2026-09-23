@@ -40,6 +40,7 @@ jobs:
         run: |
           python examples/quickstart.py
           python examples/rogue_agent.py
+          python examples/regression_from_ledger.py
       - name: CLI smoke test
         shell: bash
         run: |

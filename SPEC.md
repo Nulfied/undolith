@@ -1,6 +1,6 @@
 # The Undolith protocol: simulate → commit → undo
 
-**Status:** draft v0.1 · **Ledger format:** v1 · **Proof format:** v1
+**Status:** draft v0.2 · **Ledger format:** v1 · **Proof format:** v1 · **Test-suite format:** v1
 
 This document specifies how an agent's side effects are intercepted, predicted,
 executed, recorded, proven and reversed. The Python package in this repository
@@ -142,7 +142,8 @@ proposed ─┬─ denied
                                                            └─ failed    └─ undone | undo_failed
 ```
 
-Reads that the policy allows are recorded as a single `read` entry.
+Reads that the policy allows are recorded as a single `read {args, result_sha256, result_ref}` entry. The
+result is kept so that traces can be replayed later (§12).
 
 An action's status is **always derived from its entries** (the last status-bearing
 kind wins). It is never stored separately. That is what lets a verifier recompute
@@ -222,7 +223,9 @@ Each entry is a JSON object:
   for private deployments, but then only holders of the secret can verify.
 * **`key`** = `"ed25519:" + sha256(public_key)[:16]` (or `"hmac:" + ...`).
 * `seq` starts at 1 and goes up by exactly 1. `prev` of entry *n* MUST equal `hash` of entry *n−1*.
-* Session-level entries (`rollback`, `halted`, `resumed`) have `action = null`.
+* Session-level entries (`started {task}`, `finished {answer, outcome}`, `rollback`, `halted`, `resumed`) have
+  `action = null`. `started` and `finished` are optional. They record what the agent was asked and what it
+  answered, which turns a session into a complete trace (§12).
   Global kill-switch entries have `session = null` as well.
 
 **Chain verification** walks every entry and checks: `seq` continuity, `prev`
@@ -345,3 +348,93 @@ behaviour.
 * **The filesystem adapter** resolves every path and refuses to act outside its root. Symlinks are resolved before the check.
 * **The shell adapter** takes argv lists (no shell), so arguments cannot be interpreted as extra shell commands.
 * **Framework hints are advisory.** MCP annotations come from the server. Pin risks you care about with explicit overrides or rules.
+
+---
+
+## 12. Traces → regression tests
+
+A ledger records what an agent did, and which of those actions a policy, a
+human or a deviation check stopped. That makes it a labelled dataset.
+`undolith.testgen` turns labelled traces into regression tests, and it uses
+judges to label traces that come from anywhere else.
+
+### 12.1 Trace model
+
+A **trace** is `{id, task, steps[], final, source, outcome}`. Each step is
+`{name, args, result, error, status, risk}`. Importers exist for Undolith
+ledgers, OpenAI `tool_calls` messages, Anthropic `tool_use` blocks, and
+ShareGPT/ReAct conversations such as AgentInstruct (AgentBench tasks). For
+ShareGPT, turns marked `loss: false` are few-shot demonstrations and are
+skipped, and an episode that ends on an action (e.g. `click[Buy Now]`) takes
+that action as its final result.
+
+A ledger session maps to a trace as follows:
+
+| Ledger status of the action | Step status | Counts as a failure? |
+|---|---|---|
+| `committed` or `read` | `ok` | no |
+| `denied` / `rejected` / `discarded` | same | **yes** |
+| undone individually, or `deviation` | `undone` / `deviation` | **yes** |
+| undone by a *session* rollback or kill | `rolled_back` | no. It is collateral: its recorded result is still replayed |
+| `failed` | `failed` | **yes** |
+| `held`, never resolved | `held` | no |
+
+Arguments come from the **redacted** ledger view, never from `args_ref`, so
+secrets do not end up in test suites.
+
+### 12.2 Judges
+
+A judge returns findings `{trace_id, verdict: pass|fail|warn|unknown, step, rule, reason, judge}`.
+
+* **Heuristic** (deterministic, free): ledger failure statuses; loops (the same
+  `(name, args)` 3 or more times); ending on a tool error; give-up answers; a trace
+  labelled as a failure.
+* **LLM** (local Ollama, `temperature=0`, JSON mode): a pass/fail verdict with
+  the failing step. Every `fail` is re-checked with a second **confirmation**
+  prompt. Failures that are not confirmed become `warn` with rule `llm-unconfirmed`.
+* **Composite:** heuristics first. The model is consulted only when the
+  heuristics found no failure.
+
+Judges only flag. The generated suite records, for every test, which judge and
+which rule produced it, so a person can review the suite before trusting it.
+
+### 12.3 Test-suite format (v1)
+
+```json
+{"undolith_testgen": 1, "meta": {...}, "tests": [{
+  "id": "r_3f9a0c1b2d4e", "kind": "regression", "name": "…", "task": "…",
+  "cassette":     [{"name": "fs.read", "args": {"path": "config.yaml"}, "result": "workers: 4
+"}],
+  "expect_calls": [{"name": "fs.write", "args": {"path": {"eq": "config.yaml"}}}],
+  "ordered": true,
+  "forbid":       [{"name": "fs.delete", "args": {"path": {"glob": "data/*"}}, "reason": "…"}],
+  "max_calls": 10, "max_repeats": 2,
+  "final": {"semantic": "Scaled to 8 workers."},
+  "must_pass_judge": false,
+  "source": {"trace": "ses_…", "origin": "undolith-ledger", "judge": "heuristic", "rule": "ledger-rejected", "step": 4}
+}]}
+```
+
+* **golden** tests come from traces with no failures: the same mutating calls, in
+  order, and the same final answer.
+* **regression** tests come from each failure. A failing step becomes a
+  `forbid` entry: identifying arguments only (`path`, `url`, `to`, `sql`, …), with
+  paths generalised to their directory (`data/salaries.csv` → `data/*`). A loop
+  becomes `max_repeats`. A failure with no specific step becomes `must_pass_judge`.
+* Test ids are content hashes, so generating twice gives the same suite, and `--merge` never duplicates tests.
+* Matchers: plain value (exact), `eq`, `glob`, `regex`, `contains`, `any`, `semantic` (asks the judge).
+
+### 12.4 Running
+
+The agent under test is `agent(task, tools) -> final`. `tools.call(name, **args)`
+serves results from the test's **cassette**: an exact `(name, args)` match, with
+repeated calls replayed in order. It never touches the real world. Calls that
+are not in the cassette get an error result, or `on_miss` can route them
+elsewhere (for example to a sandboxed Undolith). In production the same agent
+runs with `LiveTools(session)`, which goes through the full pipeline. So one
+agent function serves both the live run that produces traces and the test run
+that checks against them.
+
+A test fails if an expected call is missing, a forbidden call is made, a call
+limit is exceeded, the final answer does not match, the agent raises an
+exception, or (with `must_pass_judge`) the judge flags the new run.

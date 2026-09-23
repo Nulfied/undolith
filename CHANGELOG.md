@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0 (2026-09-23)
+
+Agent traces → regression tests (`undolith.testgen`, [SPEC.md §12](SPEC.md#12-traces--regression-tests)).
+
+* Importers: Undolith ledgers, OpenAI `tool_calls`, Anthropic `tool_use`, and ShareGPT/ReAct datasets (AgentInstruct / AgentBench: OS, DB, KG, ALFWorld, WebShop, Mind2Web). `fetch-hf` reads public Hugging Face datasets through the free datasets-server API.
+* Judges: deterministic heuristics (ledger statuses, loops, tool errors, give-ups), a local Ollama judge with a self-confirmation pass that filters false positives, and a composite judge that asks the model only when heuristics are inconclusive.
+* Generator: golden tests from clean runs, regression tests from each failure (forbidden calls with generalised paths, repeat limits, judge checks), content-hashed ids, merging, secrets kept out.
+* Runner: `ReplayTools` cassettes (deterministic, no side effects), `LiveTools` to run the same agent live through Undolith, `run_suite`, and pytest export.
+* CLI: `undolith testgen from-ledger | import | judge | fetch-hf | run | export-pytest | show`.
+* Core: `session(task=...)` and `Session.finish(answer, outcome=...)` record `started` / `finished` entries. Read results are now kept (`result_ref`) so reads can be replayed.
+* New demo: `examples/regression_from_ledger.py`.
+
 ## 0.1.0 (2026-09-23)
 
 First public release.

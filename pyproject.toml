@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "undolith"
-version = "0.1.0"
+version = "0.2.0"
 description = "Simulate, commit and undo AI agent tool calls, with a signed, hash-chained action ledger."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Nulfied" }]
 requires-python = ">=3.9"
 dependencies = []
-keywords = ["ai-agents", "rollback", "undo", "audit-log", "llm", "mcp", "langchain", "safety"]
+keywords = ["ai-agents", "rollback", "undo", "audit-log", "llm", "mcp", "langchain", "safety", "regression-testing", "evals", "ollama"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

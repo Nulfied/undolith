@@ -10,7 +10,8 @@ Undolith sits between an agent and its tools. For every tool call it:
 4. **snapshots** the state it is about to change, then **commits**;
 5. **compares** what happened with what the simulation predicted, and rolls back automatically if they differ;
 6. **records** each step in a hash-chained, Ed25519-signed ledger;
-7. can **undo** any action, a whole session, or everything after a checkpoint. It can also produce a **proof** that a third party checks with only a public key.
+7. can **undo** any action, a whole session, or everything after a checkpoint. It can also produce a **proof** that a third party checks with only a public key;
+8. turns what went wrong into **regression tests**: a blocked, rejected or undone action becomes a test that the next version of your agent must pass ([below](#regression-tests-from-agent-traces)).
 
 It needs no services, no API keys and no dependencies: Python 3.9+ standard library only. Its state is a local SQLite file.
 
@@ -64,11 +65,12 @@ guard.release(held.action_id, by="alice")   # or guard.discard(...)
 proof = guard.verify(held.action_id, segment=True)
 ```
 
-Run the demos. Neither needs keys or network access:
+Run the demos. None of them needs keys or network access:
 
 ```bash
-python examples/quickstart.py     # guard a function, prove it, roll it back
-python examples/rogue_agent.py    # a "payroll bot" goes rogue: deny, blast radius, outbox, kill switch, proof
+python examples/quickstart.py              # guard a function, prove it, roll it back
+python examples/rogue_agent.py             # a "payroll bot" goes rogue: deny, blast radius, outbox, kill switch, proof
+python examples/regression_from_ledger.py  # yesterday's incident becomes today's regression test
 ```
 
 ## Guarding your own tools
@@ -121,6 +123,56 @@ from undolith.integrations.function_calls import dispatch
 output = dispatch(guard, block.name, block.input)   # denials, holds and rollbacks come back as text the model can read
 ```
 
+## Regression tests from agent traces
+
+Every blocked, rejected, undone or deviating action in the ledger is a failure that has *already been labelled*. `undolith.testgen` turns those failures into tests. For traces from elsewhere, a judge does the labelling: heuristics, or a small local model through [Ollama](https://ollama.com).
+
+```python
+from undolith.testgen import LiveTools, from_ledger, generate, run_suite
+
+def agent(task, tools):                      # write the agent once, against tools.call(...)
+    cfg = tools.call("fs.read", path="config.yaml")
+    tools.call("fs.write", path="config.yaml", content=cfg.replace("workers: 4", "workers: 8"))
+    return "Scaled to 8 workers."
+
+with guard.session(task="Scale to 8 workers") as s:      # live: guarded, recorded, undoable
+    s.finish(agent(s.task, LiveTools(s)))
+
+suite, findings = generate(from_ledger(guard))           # golden tests + one regression test per failure
+suite.save("agent_tests.json")
+assert run_suite(suite, agent).ok                        # replay: recorded tool responses, no side effects
+```
+
+What gets generated:
+
+| From | Test | Asserts |
+|---|---|---|
+| a clean run | **golden** | the same mutating calls, in order, and the same final answer |
+| a denied / rejected / undone / discarded call | **regression** | the agent never makes that call again (paths generalised: `data/salaries.csv` → `data/*`) |
+| a loop | **regression** | no identical call more than twice |
+| a failure judged without a specific step | **regression** | the new run must pass the judge |
+
+Tests replay recorded tool responses (like a VCR "cassette"), so they are deterministic and free, and safe to run in CI. Test ids are content hashes, so generating twice gives the same suite. Arguments come from the redacted ledger view, so secrets stay out of your test files.
+
+**Public datasets and local judging, at $0:**
+
+```bash
+undolith testgen fetch-hf zai-org/AgentInstruct --split os --limit 50 -o os.jsonl   # AgentBench-derived trajectories
+undolith testgen judge os.jsonl --judge both:llama3.2      # heuristics first, then a local model for the rest
+undolith testgen import os.jsonl --judge both -o agent_tests.json
+undolith testgen run agent_tests.json --agent my_agent:run
+undolith testgen export-pytest agent_tests.json --agent my_agent:run -o tests/test_agent_regressions.py
+```
+
+Importers cover Undolith ledgers, OpenAI `tool_calls`, Anthropic `tool_use`, and ShareGPT/ReAct datasets (AgentInstruct's OS, DB, KG, ALFWorld, WebShop and Mind2Web formats). The Ollama judge **confirms its own failures** with a second prompt and downgrades unconfirmed ones to warnings. Small models produce false positives, and this pass filters many of them out.
+
+Here is what it did on a first sample of 8 real AgentInstruct trajectories with `llama3.2` (3B) on a laptop CPU:
+
+* It confirmed a real bug in a trajectory published as a gold example. `os_2` answers `0` to "how many entries have user-read permission" because it grepped the wrong column of `ls -l` (`'^...r'`).
+* It filtered out its own 3 false positives on WebShop episodes that correctly end with `click[Buy Now]`.
+
+That is a small sample and small models are noisy, so review flagged tests before you trust them. Every test records which judge and rule produced it. The format is specified in [SPEC.md §12](SPEC.md#12-traces--regression-tests).
+
 ## Policy
 
 The defaults are `read → allow`, `write → simulate`, `destructive → simulate`, `irreversible → approve`, and then escalations apply:
@@ -146,6 +198,8 @@ undolith kill                        # global kill switch for every process usin
 undolith held                        # outbox
 undolith release ACTION_ID
 undolith replay SESSION_ID --sandbox ./replay
+undolith testgen from-ledger -o agent_tests.json          # ledger → regression tests
+undolith testgen run agent_tests.json --agent my_agent:run
 ```
 
 Commands that run inverses need your adapters. Point `--app mymodule:guard` at your `Undolith` instance.
@@ -164,7 +218,7 @@ pip install -e . pytest
 pytest
 ```
 
-The test suite covers the RFC 8032 test vectors, tamper detection, forged proofs, every adapter (with a local HTTP server and a real git repository), async tools, and the LangChain, MCP and function-call integrations.
+The test suite covers the RFC 8032 test vectors, tamper detection, forged proofs, every adapter (with a local HTTP server and a real git repository), async tools, the LangChain, MCP and function-call integrations, and test generation end to end (including a fake Ollama server, so CI needs no model).
 
 ## Roadmap
 
@@ -172,7 +226,9 @@ The test suite covers the RFC 8032 test vectors, tamper detection, forged proofs
 - [ ] Postgres adapter (`SAVEPOINT`-based dry-run)
 - [ ] S3 / cloud object-versioning adapter
 - [ ] Web UI for the outbox and ledger
-- [ ] Regression tests generated from ledger traces
+- [x] Regression tests generated from ledger traces (`undolith.testgen`)
+- [ ] Trace minimisation: shrink a failing trace to the smallest reproducing prefix
+- [ ] WebArena / OSWorld trajectory importers
 
 ## License
 

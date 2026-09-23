@@ -112,11 +112,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p = sub.add_parser("policy", help="print the default policy as JSON (a starting point for your own)")
 
+    from .testgen import cli as testgen_cli
+
+    testgen_cli.add_parser(sub)
+
     a = ap.parse_args(argv)
 
     if a.cmd == "policy":
         _dump(Policy().to_dict())
         return 0
+    if a.cmd == "testgen":
+        return testgen_cli.run(a)
 
     guard = _load_app(a.app, a.home)
 

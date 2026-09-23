@@ -83,12 +83,21 @@ class ReplayStep:
 class Session:
     """A run of one agent. Tracks blast-radius counters and scopes rollback."""
 
-    def __init__(self, guard: "Undolith", id: Optional[str] = None, agent: Optional[str] = None):
+    def __init__(self, guard: "Undolith", id: Optional[str] = None, agent: Optional[str] = None,
+                 task: Optional[str] = None):
         self.guard = guard
         self.id = id or new_id("ses")
         self.agent = agent or guard.agent
+        self.task = task
         self.stats = SessionStats()
         self._tokens: list = []
+        if task is not None:  # recorded so traces can be turned into regression tests later
+            guard.ledger.append("started", session=self.id, agent=self.agent, data={"task": task})
+
+    def finish(self, answer: Any = None, *, outcome: Optional[str] = None) -> None:
+        """Record the agent's final answer (and optionally ``"success"``/``"failure"``)."""
+        self.guard.ledger.append("finished", session=self.id, agent=self.agent,
+                                 data={"answer": answer, "outcome": outcome})
 
     def call(self, name: str, /, **args: Any) -> Any:
         return self.guard._execute(self, name, args)
@@ -220,8 +229,9 @@ class Undolith:
         return deco
 
     # ------------------------------------------------------------------ sessions & calls
-    def session(self, id: Optional[str] = None, *, agent: Optional[str] = None) -> Session:
-        return Session(self, id=id, agent=agent)
+    def session(self, id: Optional[str] = None, *, agent: Optional[str] = None,
+                task: Optional[str] = None) -> Session:
+        return Session(self, id=id, agent=agent, task=task)
 
     @property
     def current(self) -> Session:
@@ -267,7 +277,8 @@ class Undolith:
         if risk is Risk.READ and verdict is Verdict.ALLOW:
             result = resolve(op.run(**args))
             if self.policy.log_reads:
-                self.ledger.append("read", **ids, data={"args": self._redact(args), "result_sha256": digest(result)})
+                self.ledger.append("read", **ids, data={"args": self._redact(args), "result_sha256": digest(result),
+                                                        "result_ref": self.blobs.put_json(result)})
             return result
 
         self.ledger.append("proposed", **ids, data={
