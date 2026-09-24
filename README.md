@@ -39,10 +39,10 @@ Irreversible actions like email, payments and `git push` cannot be undone, so Un
 ## Install
 
 ```bash
-pip install git+https://github.com/Nulfied/undolith
+pip install undolith
 ```
 
-(A PyPI release, `pip install undolith`, is coming.)
+[![PyPI](https://img.shields.io/pypi/v/undolith)](https://pypi.org/project/undolith/) [![CI](https://github.com/Nulfied/undolith/actions/workflows/ci.yml/badge.svg)](https://github.com/Nulfied/undolith/actions/workflows/ci.yml)
 
 or clone the repository and run `pip install -e .`. If the optional `cryptography` package is installed, signing gets faster. Nothing else changes.
 
@@ -246,7 +246,7 @@ The test suite covers the RFC 8032 test vectors, tamper detection, forged proofs
 - [x] Regression tests generated from ledger traces (`undolith.testgen`)
 - [x] Trace minimisation (`testgen minimize`, delta debugging)
 - [x] OSWorld trajectory importer
-- [ ] PyPI release (workflow ready: trusted publishing, no stored tokens)
+- [x] PyPI release (`pip install undolith`, published by tag through trusted publishing)
 - [ ] WebArena importer (waiting on a stable public trajectory format)
 
 ## License
